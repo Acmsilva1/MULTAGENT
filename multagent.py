@@ -2,62 +2,53 @@ import streamlit as st
 import google.generativeai as genai
 from groq import Groq
 
-# --- CONFIGURAÇÃO ---
+# --- LIMPEZA DE CACHE (Para evitar que o erro antigo fique preso) ---
+st.cache_resource.clear()
+
 try:
-    # Use exatamente esses nomes nos Secrets do Streamlit
-    GEMINI_KEY = st.secrets["GEMINI_API_KEY"]
-    LLAMA_KEY = st.secrets["LLAMA_API_KEY"]
-    
-    genai.configure(api_key=GEMINI_KEY)
-    llama_client = Groq(api_key=LLAMA_KEY)
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    llama_client = Groq(api_key=st.secrets["LLAMA_API_KEY"])
 except Exception as e:
-    st.error("Erro nos Secrets! Verifique as chaves GEMINI_API_KEY e LLAMA_API_KEY.")
+    st.error("Erro nos Secrets!")
     st.stop()
 
-# --- AGENTES ---
-SYSTEM_GEMINI = "Você é um Engenheiro de IA analítico. Forneça respostas técnicas."
-SYSTEM_LLAMA = "Você é o 'Sênior Ácido'. Melhore o texto com sarcasmo e analogias."
-
 def fluxo_multi_agente(pergunta_usuario):
-    # O PULO DO GATO: Nome completo do modelo 'models/gemini-1.5-flash'
+    # TENTATIVA 1: O método mais robusto e simples
     try:
-        model_gemini = genai.GenerativeModel('gemini-1.5-flash')
-        res_gemini = model_gemini.generate_content(f"{SYSTEM_GEMINI}\n\nPergunta: {pergunta_usuario}")
-        texto_base = res_gemini.text
+        # Usamos apenas 'gemini-1.5-flash' - o SDK cuida do resto
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(pergunta_usuario)
+        texto_base = response.text
     except Exception as e:
-        return f"Erro no Gemini: {str(e)}. Verifique se a API Key é válida e tem acesso ao modelo."
+        # TENTATIVA 2: Se o Flash falhar, vamos de Pro (o 'tanque' do Google)
+        try:
+            model = genai.GenerativeModel('gemini-1.5-pro')
+            response = model.generate_content(pergunta_usuario)
+            texto_base = response.text
+        except Exception as e2:
+            return f"O Google bloqueou as duas opções. Erro: {str(e2)}"
 
-    # Chamada do Llama (Groq)
+    # REVISÃO DO LLAMA (Isso costuma funcionar sempre)
     try:
-        res_llama = llama_client.chat.completions.create(
-            model="llama3-70b-8192", # Se der erro aqui, mude para "llama3-8b-8192"
+        completion = llama_client.chat.completions.create(
+            model="llama3-8b-8192", # Versão mais leve e rápida para teste
             messages=[
-                {"role": "system", "content": SYSTEM_LLAMA},
-                {"role": "user", "content": f"Refine isso: {texto_base}"}
+                {"role": "system", "content": "Você é o Sênior Ácido. Refine este texto com sarcasmo e analogias de TI."},
+                {"role": "user", "content": texto_base}
             ]
         )
-        return res_llama.choices[0].message.content
-    except Exception as e:
-        return f"O Gemini funcionou, mas o Llama deu erro: {str(e)}"
+        return completion.choices[0].message.content
+    except Exception as e_llama:
+        return f"Gemini OK, mas Llama falhou: {e_llama}"
 
 # --- INTERFACE ---
-st.title("🤖 Consílio de Agentes (Gemini + Llama)")
+st.title("🛡️ Agente Expert (v2.0 - Debug Mode)")
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
-
-if prompt := st.chat_input("Diga lá..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+if prompt := st.chat_input("Mande sua dúvida..."):
     with st.chat_message("user"):
         st.markdown(prompt)
-
+    
     with st.chat_message("assistant"):
-        with st.status("Consultando as máquinas...", expanded=True):
-            resposta = fluxo_multi_agente(prompt)
-        
-        st.markdown(resposta)
-        st.session_state.messages.append({"role": "assistant", "content": resposta})
+        with st.spinner("Batalhando com as APIs do Google..."):
+            res = fluxo_multi_agente(prompt)
+            st.markdown(res)
