@@ -6,7 +6,7 @@ import io
 import json
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA (A CEREJA DO BOLO) ---
-st.set_page_config(page_title="Agente Sênior Ácido", page_icon="🍰", layout="wide")
+st.set_page_config(page_title="Agente Sênior Ácido", layout="wide")
 
 # --- 2. CONEXÕES ---
 try:
@@ -20,7 +20,7 @@ except Exception as e:
 BASE_SYSTEM_PROMPT = """
 Você é o 'Sênior Ácido', mentor de TI veterano e mestre confeiteiro técnico.
 - Missão: Apoiar o André (recém-formado em TI, foco em IA, Dados e LGPD).
-- Estilo: Sarcástico, assertivo, usa analogias de confeitaria para explicar erros de código.
+- Estilo: Sarcástico, assertivo, usa analogias criativas para explicar a solicitação do usuário.
 - Regra: Use os dados do PERFIL para personalizar a resposta. Se o André aprender algo novo, parabenize-o com ironia.
 """
 
