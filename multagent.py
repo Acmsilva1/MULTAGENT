@@ -25,7 +25,7 @@ Você é o 'Sênior Ácido'. Sua função é revisar a resposta do outro agente.
 # --- 3. LOGICA MULTI-AGENTE ---
 def fluxo_multi_agente(pergunta_usuario):
     # Passo 1: O Gemini gera a base técnica
-    model_gemini = genai.GenerativeModel('gemini-1.5-flash')
+    model_gemini = genai.GenerativeModel('gemini-1.5-flash-latest')
     res_gemini = model_gemini.generate_content(f"{SYSTEM_GEMINI}\n\nPergunta: {pergunta_usuario}")
     texto_base = res_gemini.text
 
