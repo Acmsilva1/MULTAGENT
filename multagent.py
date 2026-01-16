@@ -2,11 +2,10 @@ import streamlit as st
 from groq import Groq
 from supabase import create_client, Client
 import pandas as pd
-import io
 import json
 
-# --- 1. CONFIGURAÇÃO DA PÁGINA (A CEREJA DO BOLO) ---
-st.set_page_config(page_title="Agente Sênior Ácido", layout="wide")
+# --- 1. CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Sênior Ácido v7.0", layout="wide")
 
 # --- 2. CONEXÕES ---
 try:
@@ -16,66 +15,56 @@ except Exception as e:
     st.error(f"Erro na fiação técnica: {e}")
     st.stop()
 
-# --- 3. DEFINIÇÕES DE PERSONALIDADE E IA ---
+# --- 3. DEFINIÇÕES DE PERSONALIDADE E CLASSIFICADOR ---
 BASE_SYSTEM_PROMPT = """
-Você é o 'Sênior Ácido', mentor de TI veterano e mestre confeiteiro técnico.
-- Missão: Apoiar o André (recém-formado em TI, foco em IA, Dados e LGPD).
-- Estilo: Sarcástico, assertivo, usa analogias criativas para explicar a solicitação do usuário.
-- Regra: Use os dados do PERFIL para personalizar a resposta. Se o André aprender algo novo, parabenize-o com ironia.
+Você é o 'Sênior', mentor de TI veterano e mestre confeiteiro técnico.
+- Missão: Apoiar o André (TI, IA, Dados e LGPD).
+- Estilo: Sarcástico, assertivo, usa analogias gerais.
+- Regra: Use os dados do PERFIL para personalizar a resposta.
 """
 
 CLASSIFIER_PROMPT = """
-Analise a mensagem do usuário e extraia fatos RELEVANTES e PERMANENTES (carreira, novas ferramentas, hobbies, regras de LGPD).
+Analise a mensagem do usuário e extraia fatos RELEVANTES e PERMANENTES.
 Responda APENAS em JSON: 
-{"is_important": boolean, "fact_type": "formacao/interesses/lgpd", "extracted_info": "string ou null"}
+{"is_important": boolean, "fact_type": "carreira/hobbies/lgpd/outros", "extracted_info": "string ou null"}
 """
 
-# --- 4. FUNÇÕES DE BUSCA DE DADOS ---
+# --- 4. FUNÇÕES DE BUSCA ---
 def carregar_dados_usuario():
     try:
-        # Busca perfil fixo
         perfil = supabase.table("perfil_usuario").select("*").eq("usuario", "André").single().execute().data
-        # Busca histórico recente (últimas 3)
         historico = supabase.table("historico_conversas").select("pergunta, resposta").eq("usuario", "André").order("created_at", desc=True).limit(3).execute().data
-        
         hist_str = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in historico]) if historico else ""
         return perfil, hist_str
     except Exception as e:
-        st.sidebar.error(f"Erro ao ler DB: {e}")
         return None, ""
 
-# --- 5. INTERFACE LATERAL (SIDEBAR) ---
+# --- 5. SIDEBAR (AUDITORIA EM TEMPO REAL) ---
 with st.sidebar:
-    st.header("🧠 Memória do Sistema")
-    
+    st.header("🧠 Memória Core")
     perfil, historico_recente = carregar_dados_usuario()
     
     if perfil:
-        st.subheader("Perfil do André (Core)")
-        st.info(f"🎓 **Foco:** {perfil.get('formacao')}")
-        st.info(f"🎨 **Interesses:** {perfil.get('interesses')}")
-        with st.expander("Ver JSON Bruto do Banco"):
+        st.write(f"🎓 **Foco:** {perfil.get('formacao')}")
+        st.write(f"🎨 **Interesses:** {perfil.get('interesses')}")
+        st.write(f"⚖️ **LGPD:** {perfil.get('diretrizes_lgpd')}")
+        with st.expander("Ver JSON do Banco"):
             st.json(perfil)
     
     st.divider()
-    st.header("🗂️ Analisador de Arquivos")
-    arquivo = st.file_uploader("Suba um código ou log", type=["txt", "py", "csv", "log"])
-    
+    st.header("🗂️ Arquivos")
+    arquivo = st.file_uploader("Upload de contexto", type=["txt", "py", "csv", "log"])
     conteudo_arquivo = ""
     if arquivo:
         if arquivo.name.endswith(".csv"):
             df = pd.read_csv(arquivo)
             conteudo_arquivo = f"\n[CSV DATA]:\n{df.head(10).to_string()}"
         else:
-            conteudo_arquivo = f"\n[FILE CONTENT]:\n{arquivo.getvalue().decode('utf-8')}"
-        st.success("Arquivo processado!")
-
-    if st.button("Limpar Histórico Visual"):
-        st.session_state.messages = []
-        st.rerun()
+            conteudo_arquivo = f"\n[FILE]:\n{arquivo.getvalue().decode('utf-8')}"
+        st.success("Arquivo pronto!")
 
 # --- 6. CHAT PRINCIPAL ---
-st.title("Agente Pessoal: TI & Confeitaria")
+st.title("Agente Pessoal")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -84,15 +73,15 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("O que vamos cozinhar hoje?"):
+if prompt := st.chat_input("Diga algo importante ou apenas jogue conversa fora..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.status("Pensando...", expanded=False) as status:
+        with st.status("Processando ingredientes...", expanded=False) as status:
             
-            # PASSO 1: Classificar se o que o André disse deve ser salvo no Perfil
+            # PASSO 1: Classificar importância
             try:
                 analise_res = client_groq.chat.completions.create(
                     messages=[{"role": "system", "content": CLASSIFIER_PROMPT}, {"role": "user", "content": prompt}],
@@ -103,19 +92,29 @@ if prompt := st.chat_input("O que vamos cozinhar hoje?"):
             except:
                 decisao = {"is_important": False}
 
-            # PASSO 2: Update real no Banco de Dados se for importante
+            # PASSO 2: Roteamento e Update (O coração da sua dúvida)
             if decisao.get("is_important"):
-                info = decisao.get("extracted_info")
-                tipo = decisao.get("fact_type")
-                # Mapeamento para as colunas do seu novo SQL
-                coluna = "formacao" if tipo == "formacao" else "interesses"
+                info_nova = decisao.get("extracted_info")
+                tipo_ia = decisao.get("fact_type").lower()
                 
-                supabase.table("perfil_usuario").update({coluna: info}).eq("usuario", "André").execute()
-                status.write(f"✅ Memória de longo prazo atualizada: {info}")
+                # Mapeamento para as colunas físicas do DB
+                if any(x in tipo_ia for x in ["carreira", "formacao", "cargo", "estudos"]):
+                    coluna_alvo = "formacao"
+                elif any(x in tipo_ia for x in ["lgpd", "seguranca", "privacidade"]):
+                    coluna_alvo = "diretrizes_lgpd"
+                else:
+                    coluna_alvo = "interesses"
 
-            # PASSO 3: Gerar resposta com todo o contexto
-            perfil_contexto = f"Perfil do André: {perfil}" if perfil else "André: Dev de TI."
-            prompt_final = f"{BASE_SYSTEM_PROMPT}\n\nCONTEXTO DO USUÁRIO: {perfil_contexto}\n\nHISTÓRICO: {historico_recente}\n\nARQUIVO: {conteudo_arquivo}"
+                # Lógica de concatenação para não apagar o passado
+                dado_atual = perfil.get(coluna_alvo) if perfil else ""
+                if info_nova.lower() not in str(dado_atual).lower():
+                    valor_atualizado = f"{dado_atual} | {info_nova}" if dado_atual else info_nova
+                    supabase.table("perfil_usuario").update({coluna_alvo: valor_atualizado}).eq("usuario", "André").execute()
+                    status.write(f"💾 {coluna_alvo} atualizado com sucesso!")
+
+            # PASSO 3: Resposta com o DNA atualizado
+            perfil_contexto = f"Perfil Atual do André: {perfil}"
+            prompt_final = f"{BASE_SYSTEM_PROMPT}\n\nCONTEXTO: {perfil_contexto}\n\nHISTÓRICO: {historico_recente}\n\nARQUIVO: {conteudo_arquivo}"
             
             res_ia = client_groq.chat.completions.create(
                 messages=[{"role": "system", "content": prompt_final}, *st.session_state.messages],
@@ -123,14 +122,12 @@ if prompt := st.chat_input("O que vamos cozinhar hoje?"):
             )
             resposta = res_ia.choices[0].message.content
             
-            # PASSO 4: Salvar a conversa no Histórico (Buffer)
+            # PASSO 4: Log de conversa
             supabase.table("historico_conversas").insert({
-                "pergunta": prompt, 
-                "resposta": resposta,
-                "categoria": "importante" if decisao.get("is_important") else "casual"
+                "pergunta": prompt, "resposta": resposta, "categoria": "importante" if decisao.get("is_important") else "casual"
             }).execute()
             
-            status.update(label="Análise completa!", state="complete")
+            status.update(label="Tudo pronto!", state="complete")
 
         st.markdown(resposta)
         st.session_state.messages.append({"role": "assistant", "content": resposta})
