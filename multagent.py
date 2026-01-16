@@ -5,7 +5,7 @@ import pandas as pd
 import json
 
 # --- 1. CONFIGURAÇÃO E CONEXÕES ---
-st.set_page_config(page_title="Sênior Ácido v7.5", page_icon="🍰", layout="wide")
+st.set_page_config(page_title="Agente Pessoal", layout="wide")
 
 try:
     client_groq = Groq(api_key=st.secrets["LLAMA_API_KEY"])
@@ -15,7 +15,7 @@ except Exception as e:
     st.stop()
 
 # --- 2. PERSONALIDADE E CLASSIFICADOR ---
-BASE_SYSTEM_PROMPT = "Você é o 'Sênior Ácido', mentor de TI e mestre confeiteiro. Ajude o André."
+BASE_SYSTEM_PROMPT = "Você é o 'Sênior', mentor de TI e mestre confeiteiro. Ajude o André. Use analogias intligentes nas explicações. Seja sarcástico sem exagerar ou ofender."
 CLASSIFIER_PROMPT = 'Analise a mensagem e extraia fatos em JSON: {"is_important": boolean, "fact_type": "string", "extracted_info": "string"}'
 
 # --- 3. FUNÇÕES DE BANCO DE DADOS ---
