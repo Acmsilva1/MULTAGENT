@@ -21,7 +21,7 @@ SYSTEM_LLAMA = "Você é o 'Sênior Ácido'. Melhore o texto com sarcasmo e anal
 def fluxo_multi_agente(pergunta_usuario):
     # O PULO DO GATO: Nome completo do modelo 'models/gemini-1.5-flash'
     try:
-        model_gemini = genai.GenerativeModel('models/gemini-1.5-flash')
+        model_gemini = genai.GenerativeModel('gemini-1.5-flash')
         res_gemini = model_gemini.generate_content(f"{SYSTEM_GEMINI}\n\nPergunta: {pergunta_usuario}")
         texto_base = res_gemini.text
     except Exception as e:
