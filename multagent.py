@@ -3,49 +3,50 @@ from groq import Groq
 from supabase import create_client, Client
 import json
 
-# --- 1. CONFIGURAÇÃO (TOTAL CLEAN) ---
+# --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="Agente pessoal", layout="centered", initial_sidebar_state="collapsed")
 
-# --- 2. CSS AVANÇADO: A DOCA DE COMANDOS ---
+# --- 2. CSS PARA DOCK HORIZONTAL FLUTUANTE ---
 st.markdown("""
     <style>
-        /* Remove elementos inúteis do Streamlit */
         [data-testid="stSidebar"], #MainMenu, footer {display: none;}
         
-        /* Container flutuante na direita centralizado verticalmente */
+        /* A Doca agora é horizontal e fica no topo à direita */
         .floating-dock {
             position: fixed;
-            right: 25px;
-            top: 50%;
-            transform: translateY(-50%);
+            right: 30px;
+            top: 30px;
             display: flex;
-            flex-direction: column;
-            gap: 15px;
+            align-items: center;
+            gap: 10px;
             z-index: 1000;
-            background: rgba(38, 39, 48, 0.8);
-            padding: 15px;
-            border-radius: 50px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+            background: rgba(30, 31, 38, 0.9);
+            padding: 8px 15px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(15px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
         }
 
-        /* Ajuste do Uploader para não quebrar o layout */
-        .stFileUploader section {
-            padding: 0 !important;
-            width: 45px !important;
-            min-width: 45px !important;
+        /* Compactar o Uploader para virar um ícone */
+        .stFileUploader { width: 45px !important; }
+        .stFileUploader section { padding: 0 !important; min-height: 45px !important; }
+        .stFileUploader label, .stFileUploader small { display: none !important; }
+        .stFileUploader [data-testid="stFileUploadDropzone"] { 
+            border: none !important; 
+            background: transparent !important; 
         }
-        .stFileUploader label { display: none; }
         
-        /* Ajuste do botão Novo para o Dock */
+        /* Botão Novo circular */
         div.stButton > button {
             border-radius: 50% !important;
-            width: 45px !important;
-            height: 45px !important;
-            padding: 0 !important;
-            font-size: 20px !important;
+            width: 42px !important;
+            height: 42px !important;
+            border: none !important;
+            background: rgba(255, 255, 255, 0.05) !important;
+            transition: 0.3s;
         }
+        div.stButton > button:hover { background: rgba(255, 255, 255, 0.2) !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -56,72 +57,64 @@ except Exception as e:
     st.error(f"Erro na conexão: {e}")
     st.stop()
 
-# --- 3. LÓGICA DE DADOS ---
-def carregar_contexto():
-    try:
-        perfil = supabase.table("perfil_usuario").select("*").eq("usuario", "André").single().execute().data
-        hist = supabase.table("historico_conversas").select("pergunta, resposta").eq("usuario", "André").order("created_at", desc=True).limit(2).execute().data
-        return perfil, hist
-    except: return {}, []
-
-# --- 4. BARRA DE FERRAMENTAS FLUTUANTE (DOCK) ---
-# Usamos colunas vazias apenas para posicionar o uploader no dock
+# --- 3. DOCK LADO A LADO ---
+# Usamos colunas dentro de um container fixo via HTML/CSS
 with st.container():
-    # Isso cria a estrutura visual no lado direito
+    # Simulando a doca horizontal
     st.markdown('<div class="floating-dock">', unsafe_allow_html=True)
+    col_btn, col_upload = st.columns([1, 1])
     
-    # Botão Novo Diálogo
-    if st.button("🆕", help="Resetar conversa atual"):
-        st.session_state.messages = []
-        st.rerun()
-    
-    # Upload de Arquivo (Ícone de Clipe)
-    uploaded_file = st.file_uploader("📎", type=["txt", "py", "csv"], help="Anexar contexto (LGPD Ativa)")
+    with col_btn:
+        if st.button("Novo"):
+            st.session_state.messages = []
+            st.rerun()
+            
+    with col_upload:
+        uploaded_file = st.file_uploader("📎", type=["txt", "py", "csv"], label_visibility="collapsed")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 5. CHAT PRINCIPAL ---
+# --- 4. CHAT PRINCIPAL ---
 st.title("Agente pessoal")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Área de Chat
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("Em que posso ser útil hoje?"):
-    contexto_arquivo = ""
+# Input de Chat
+if prompt := st.chat_input("Em que posso ser útil?"):
+    # Lógica de processamento de arquivo
+    file_content = ""
     if uploaded_file:
-        stringio = uploaded_file.getvalue().decode("utf-8")
-        contexto_arquivo = f"\n\n[FILE_CONTEXT: {uploaded_file.name}]\n{stringio}"
+        content = uploaded_file.getvalue().decode("utf-8")
+        file_content = f"\n\n[ARQUIVO LIDO: {uploaded_file.name}]\n{content}"
     
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt if not uploaded_file else f"📎 **{uploaded_file.name}**\n\n{prompt}")
 
     with st.chat_message("assistant"):
-        perfil, hist_raw = carregar_contexto()
-        
-        # 1. IA Analisa TUDO (Prompt + Arquivo + LGPD)
+        # IA gera resposta com contexto
         res_ia = client_groq.chat.completions.create(
             messages=[
-                {"role": "system", "content": f"Você é o Sênior. Sarcástico e técnico. Usa analogias criativas e assertivas. Perfil: {perfil}. Analise arquivos para LGPD/Malware."},
+                {"role": "system", "content": "Você é o Sênior. Mentor de TI. Sarcástico. Usa analogias criativas quando necessário. Foco em LGPD."},
                 *st.session_state.messages,
-                {"role": "user", "content": contexto_arquivo} if contexto_arquivo else {"role": "system", "content": "Nenhum arquivo enviado."}
+                {"role": "user", "content": file_content} if file_content else {"role": "system", "content": "Sem anexos."}
             ],
             model="llama-3.3-70b-versatile"
         )
         resposta = res_ia.choices[0].message.content
-
-        # 2. Notificação de Memória (Sempre que algo for relevante)
-        # Lógica interna para decidir se salvamos
-        if len(prompt) > 20 or uploaded_file:
-            supabase.table("historico_conversas").insert({
-                "usuario": "André", "pergunta": prompt, "resposta": resposta, 
-                "categoria": "importante" if uploaded_file else "casual"
-            }).execute()
-            if uploaded_file: st.toast("Arquivo processado!")
+        
+        # Salvamento no Banco (Só o texto do prompt, sem o dump do arquivo para não estourar o DB)
+        supabase.table("historico_conversas").insert({
+            "usuario": "André", "pergunta": prompt, "resposta": resposta, 
+            "categoria": "importante" if uploaded_file else "casual"
+        }).execute()
 
         st.markdown(resposta)
         st.session_state.messages.append({"role": "assistant", "content": resposta})
+        if uploaded_file: st.toast("Contexto do arquivo integrado!", icon="📎")
