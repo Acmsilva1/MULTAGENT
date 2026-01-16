@@ -3,11 +3,11 @@ from groq import Groq
 from supabase import create_client, Client
 import json
 
-# --- 1. CONFIGURAÇÃO (LAYOUT CENTRALIZADO) ---
+# --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="Agente Pessoal", layout="centered", initial_sidebar_state="collapsed")
 
-# CSS para esconder a sidebar e focar no chat
-st.markdown("<style>[data-testid='stSidebar'] {display: none;} .stChatInput {bottom: 20px;}</style>", unsafe_allow_html=True)
+# CSS para esconder sidebar e ajustar o botão de upload
+st.markdown("<style>[data-testid='stSidebar'] {display: none;} .stFileUploader {margin-bottom: -40px;}</style>", unsafe_allow_html=True)
 
 try:
     client_groq = Groq(api_key=st.secrets["LLAMA_API_KEY"])
@@ -18,8 +18,11 @@ except Exception as e:
 
 # --- 2. DEFINIÇÕES DE IA ---
 BASE_SYSTEM_PROMPT = """Você é o 'Sênior', mentor de TI e mestre confeiteiro. 
-Responda ao André com sarcasmo assertivo e analogias. 
-Sempre que salvar algo no perfil dele (formação ou interesses), avise-o na resposta com uma frase curta."""
+Responda ao André com sarcasmo assertivo e analogias criativas..
+DIRETRIZES: 
+1. Analise arquivos em busca de dados sensíveis (LGPD) ou malwares.
+2. Se algo for salvo no perfil dele, avise-o.
+3. Se o arquivo for perigoso, dê um "puxão de orelha" técnico."""
 
 CLASSIFIER_PROMPT = 'Analise a mensagem. Responda APENAS JSON: {"is_important": boolean, "fact_type": "string", "extracted_info": "string"}'
 
@@ -27,30 +30,40 @@ CLASSIFIER_PROMPT = 'Analise a mensagem. Responda APENAS JSON: {"is_important": 
 def carregar_contexto():
     try:
         perfil = supabase.table("perfil_usuario").select("*").eq("usuario", "André").single().execute().data
-        hist = supabase.table("historico_conversas").select("pergunta, resposta").eq("usuario", "André").order("created_at", desc=True).limit(3).execute().data
+        hist = supabase.table("historico_conversas").select("pergunta, resposta").eq("usuario", "André").order("created_at", desc=True).limit(2).execute().data
         return perfil, hist
     except: return {}, []
 
 # --- 4. INTERFACE ---
-col_t, col_b = st.columns([0.8, 0.2])
-with col_t:
-    st.title("Agente Pessoal")
+col_t, col_b = st.columns([0.85, 0.15])
+with col_t: st.title("Agente Sênior Ácido")
 with col_b:
-    # BOTÃO DE NOVO DIÁLOGO (Limpa a memória da conversa atual)
-    if st.button("🆕 Novo"):
+    if st.button("Novo"):
         st.session_state.messages = []
         st.rerun()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Exibição do histórico da sessão
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-if prompt := st.chat_input("Em que posso ser útil hoje?"):
+# --- 5. INPUT E UPLOAD (LADO A LADO) ---
+st.divider()
+# O clipe de papel (Upload) logo acima do input de texto
+uploaded_file = st.file_uploader("", type=["txt", "py", "csv", "json"], label_visibility="collapsed")
+
+if prompt := st.chat_input("Em que posso ajudar hoje?"):
+    # Se houver arquivo, adicionamos o contexto dele ao prompt
+    contexto_arquivo = ""
+    if uploaded_file is not None:
+        stringio = uploaded_file.getvalue().decode("utf-8")
+        contexto_arquivo = f"\n\n[CONTEÚDO DO ARQUIVO ANEXADO]:\n{stringio}"
+    
+    full_prompt = prompt + contexto_arquivo
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"): st.markdown(prompt if not uploaded_file else f"📎 {uploaded_file.name}\n\n{prompt}")
 
     with st.chat_message("assistant"):
         perfil, hist_raw = carregar_contexto()
@@ -73,9 +86,9 @@ if prompt := st.chat_input("Em que posso ser útil hoje?"):
             if info and info.lower() not in str(dado_atual).lower():
                 novo_valor = f"{dado_atual} | {info}" if dado_atual else info
                 supabase.table("perfil_usuario").update({coluna: novo_valor}).eq("usuario", "André").execute()
-                memoria_aviso = f"\n\n*(Nota técnica: Acabei de anotar '{info}' no seu perfil de {coluna}.)*"
+                memoria_aviso = f"\n\n*(Salvei '{info}' em seu perfil de {coluna}.)*"
 
-        # 3. Resposta Final
+        # 3. Resposta Final (IA analisa o texto + arquivo)
         hist_context = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in hist_raw])
         res_final = client_groq.chat.completions.create(
             messages=[{"role": "system", "content": f"{BASE_SYSTEM_PROMPT}\n\nPERFIL: {perfil}\nHISTÓRICO: {hist_context}"}, *st.session_state.messages],
@@ -83,11 +96,10 @@ if prompt := st.chat_input("Em que posso ser útil hoje?"):
         )
         resposta = res_final.choices[0].message.content + memoria_aviso
 
-        # 4. Salvamento
-        is_imp = decisao.get("is_important") or any(x in prompt.lower() for x in ["receita", "script"])
+        # 4. Salvamento no DB
         supabase.table("historico_conversas").insert({
             "usuario": "André", "pergunta": prompt, "resposta": resposta, 
-            "categoria": "importante" if is_imp else "casual"
+            "categoria": "importante" if (decisao.get("is_important") or uploaded_file) else "casual"
         }).execute()
 
         st.markdown(resposta)
