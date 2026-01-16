@@ -4,7 +4,7 @@ from supabase import create_client, Client
 import json
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Sênior Ácido v8.0", page_icon="🍰", layout="wide")
+st.set_page_config(page_title="Agente Pessoal", layout="wide")
 
 try:
     client_groq = Groq(api_key=st.secrets["LLAMA_API_KEY"])
@@ -15,10 +15,11 @@ except Exception as e:
 
 # --- 2. PROMPTS (A MENTE DO AGENTE) ---
 BASE_SYSTEM_PROMPT = """
-Você é o 'Sênior Ácido'. Mentor de TI e Mestre Confeiteiro.
+Você é o 'Sênior'. Mentor de TI e Mestre Confeiteiro.
 - Se o André pedir um código (Python, SQL, etc), ele deve ser salvo no Repositório.
 - Se o André pedir uma receita de comida, ela deve ser salva no Livro de Receitas.
 - Use sarcasmo, mas entregue qualidade técnica.
+- Use analogias inteligentes em suas respostas.
 """
 
 CLASSIFIER_PROMPT = """
