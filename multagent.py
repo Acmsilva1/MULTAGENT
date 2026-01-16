@@ -63,7 +63,7 @@ with st.sidebar:
         deletar_casuais()
         st.rerun()
     
-    st.caption("Agente Pessoal v16.1 | Governança Ativa")
+    st.caption("Agente Pessoal")
 
 # --- 5. INTERFACE DE CHAT ---
 st.title("Agente Pessoal")
