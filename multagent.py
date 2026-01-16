@@ -34,7 +34,7 @@ def carregar_contexto():
 # --- 4. INTERFACE ---
 col_t, col_b = st.columns([0.8, 0.2])
 with col_t:
-    st.title("Agente Sênior Ácido")
+    st.title("Agente Pessoal")
 with col_b:
     # BOTÃO DE NOVO DIÁLOGO (Limpa a memória da conversa atual)
     if st.button("🆕 Novo"):
@@ -48,7 +48,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("O que vamos codificar hoje?"):
+if prompt := st.chat_input("Em que posso ser útil hoje?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
@@ -73,7 +73,7 @@ if prompt := st.chat_input("O que vamos codificar hoje?"):
             if info and info.lower() not in str(dado_atual).lower():
                 novo_valor = f"{dado_atual} | {info}" if dado_atual else info
                 supabase.table("perfil_usuario").update({coluna: novo_valor}).eq("usuario", "André").execute()
-                memoria_aviso = f"\n\n*(Nota técnica: Acabei de anotar '{info}' no seu perfil de {coluna}. Minha memória core agradece.)*"
+                memoria_aviso = f"\n\n*(Nota técnica: Acabei de anotar '{info}' no seu perfil de {coluna}.)*"
 
         # 3. Resposta Final
         hist_context = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in hist_raw])
