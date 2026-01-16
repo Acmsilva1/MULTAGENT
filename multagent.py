@@ -3,90 +3,78 @@ from groq import Groq
 from supabase import create_client, Client
 import json
 
-# --- 1. CONFIGURAÇÃO ---
+# --- 1. CONFIGURAÇÃO E CONEXÕES ---
 st.set_page_config(page_title="Agente Pessoal", layout="wide")
 
 try:
     client_groq = Groq(api_key=st.secrets["LLAMA_API_KEY"])
     supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 except Exception as e:
-    st.error(f"Erro na conexão: {e}")
+    st.error(f"Erro na fiação técnica: {e}")
     st.stop()
 
-# --- 2. PROMPTS (A MENTE DO AGENTE) ---
+# --- 2. PROMPTS ---
 BASE_SYSTEM_PROMPT = """
 Você é o 'Sênior'. Mentor de TI e Mestre Confeiteiro.
-- Se o André pedir um código (Python, SQL, etc), ele deve ser salvo no Repositório.
-- Se o André pedir uma receita de comida, ela deve ser salva no Livro de Receitas.
-- Use sarcasmo, mas entregue qualidade técnica.
-- Use analogias inteligentes em suas respostas.
+Use sarcasmo e analogias criativas. 
+Responda de forma assertiva e guarde códigos e receitas no catálogo.
 """
 
 CLASSIFIER_PROMPT = """
 Analise a mensagem. Responda APENAS JSON:
-{"is_important": boolean, "category": "snippet/receita/carreira/casual", "title": "título curto", "content": "o conteúdo formatado"}
+{"is_important": boolean, "category": "snippet/receita/carreira/casual"}
 """
 
-# --- 3. FUNÇÕES DE BUSCA ---
+# --- 3. LÓGICA DE DADOS ---
 def carregar_dados():
-    perfil = supabase.table("perfil_usuario").select("*").eq("usuario", "André").single().execute().data
-    # Busca tudo que foi marcado como importante para o catálogo
-    catalogo = supabase.table("historico_conversas").select("*").eq("categoria", "importante").order("created_at", desc=True).execute().data
-    return perfil, catalogo
+    try:
+        perfil = supabase.table("perfil_usuario").select("*").eq("usuario", "André").single().execute().data
+        catalogo = supabase.table("historico_conversas").select("*").eq("categoria", "importante").order("created_at", desc=True).execute().data
+        return perfil, catalogo
+    except:
+        return {}, []
 
-# --- 4. INTERFACE ---
 perfil, catalogo = carregar_dados()
 
-# Sidebar de Governança
+# --- 4. SIDEBAR DE GOVERNANÇA ---
 with st.sidebar:
     st.header("🧹 Governança")
-    if st.button("Limpar Histórico Casual"):
+    if st.button("🗑️ Limpar Conversas Casuais"):
         supabase.table("historico_conversas").delete().eq("categoria", "casual").execute()
-        st.success("Faxina concluída!")
+        st.success("Faxina completa!")
         st.rerun()
     
     st.divider()
-    st.header("🎓 Perfil Ativo")
-    st.info(f"**Foco:** {perfil.get('formacao')}")
-    st.info(f"**Objetivo:** {perfil.get('interesses')}")
+    st.header("🎓 Perfil do André")
+    st.write(f"**Foco:** {perfil.get('formacao', 'TI')}")
+    st.write(f"**Interesses:** {perfil.get('interesses', 'Dados/IA')}")
+    with st.expander("🔍 Ver Perfil Completo"):
+        st.json(perfil)
 
-# Tabs Principais
-tab_chat, tab_snippets, tab_receitas = st.tabs(["💬 Chat", "💻 Snippets de TI", "📖 Livro de Receitas"])
+# --- 5. ÁREA DO CHAT (FLUXO PRINCIPAL) ---
+st.title("Agente Sênior Ácido")
+st.caption("Focado em TI, Dados e Confeitaria Técnica")
 
-# --- ABA DE SNIPPETS ---
-with tab_snippets:
-    st.header("Repositório de Código")
-    for item in catalogo:
-        # Tenta identificar se o conteúdo tem cara de código
-        if "def " in item['resposta'] or "import " in item['resposta'] or "```" in item['resposta']:
-            with st.expander(f"📌 {item.get('pergunta')[:30]}..."):
-                st.code(item['resposta'])
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# --- ABA DE RECEITAS ---
-with tab_receitas:
-    st.header("Livro de Receitas Técnicas")
-    for item in catalogo:
-        # Filtra por palavras-chave de culinária se não houver categoria explícita
-        culinaria = ["açúcar", "forno", "receita", "ingredientes", "bolo"]
-        if any(word in item['resposta'].lower() for word in culinaria):
-            with st.expander(f"🍰 {item.get('pergunta')[:30]}..."):
-                st.write(item['resposta'])
+# Container para as mensagens (para não empurrar o input)
+chat_container = st.container()
 
-# --- ABA DE CHAT ---
-with tab_chat:
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
+with chat_container:
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Peça um script ou uma receita de Red Velvet..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+# Input fixo no final
+if prompt := st.chat_input("Peça um script ou uma receita técnica..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with chat_container:
         with st.chat_message("user"): st.markdown(prompt)
 
+    with chat_container:
         with st.chat_message("assistant"):
-            with st.status("Catalogando...", expanded=False):
+            with st.status("Processando ingredientes...", expanded=False):
                 # Classificação
                 res_class = client_groq.chat.completions.create(
                     messages=[{"role": "system", "content": CLASSIFIER_PROMPT}, {"role": "user", "content": prompt}],
@@ -94,21 +82,39 @@ with tab_chat:
                 )
                 decisao = json.loads(res_class.choices[0].message.content)
 
-                # Geração da Resposta
+                # Resposta
                 res_final = client_groq.chat.completions.create(
                     messages=[{"role": "system", "content": BASE_SYSTEM_PROMPT}, *st.session_state.messages],
                     model="llama-3.3-70b-versatile"
                 )
                 resposta = res_final.choices[0].message.content
 
-                # Salvamento Inteligente
-                is_imp = decisao.get("is_important") or "receita" in prompt.lower() or "codigo" in prompt.lower()
+                # Salvamento
+                is_imp = decisao.get("is_important") or any(x in prompt.lower() for x in ["receita", "script", "codigo"])
                 supabase.table("historico_conversas").insert({
-                    "pergunta": prompt, 
-                    "resposta": resposta, 
+                    "pergunta": prompt, "resposta": resposta, 
                     "categoria": "importante" if is_imp else "casual"
                 }).execute()
 
             st.markdown(resposta)
             st.session_state.messages.append({"role": "assistant", "content": resposta})
-            if is_imp: st.toast("Novo item catalogado!", icon="🔖")
+            if is_imp: st.toast("🔖 Item catalogado com sucesso!")
+
+# --- 6. CATÁLOGOS ABAIXO DO CHAT ---
+st.divider()
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("💻 Snippets de TI")
+    for item in catalogo:
+        if any(x in item['resposta'] for x in ["def ", "import ", "```"]):
+            with st.expander(f"📌 {item['pergunta'][:40]}..."):
+                st.code(item['resposta'])
+
+with col2:
+    st.subheader("📖 Livro de Receitas")
+    culinaria = ["açúcar", "forno", "receita", "ingrediente", "bolo", "massa"]
+    for item in catalogo:
+        if any(word in item['resposta'].lower() for word in culinaria):
+            with st.expander(f"🍰 {item['pergunta'][:40]}..."):
+                st.markdown(item['resposta'])
