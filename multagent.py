@@ -1,78 +1,78 @@
 import streamlit as st
 from groq import Groq
 from supabase import create_client, Client
+import pandas as pd
+import io
 
-# --- 1. CONEXÃO COM OS MOTORES (RODA NO BOOT) ---
+# --- 1. CONEXÕES (MANTIDAS) ---
 try:
-    # Llama (Cérebro)
     client_groq = Groq(api_key=st.secrets["LLAMA_API_KEY"])
-    
-    # Supabase (Memória de Longo Prazo)
-    supabase: Client = create_client(
-        st.secrets["SUPABASE_URL"], 
-        st.secrets["SUPABASE_KEY"]
-    )
+    supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 except Exception as e:
-    st.error(f"Erro na fiação técnica: {e}")
+    st.error(f"Erro de conexão: {e}")
     st.stop()
 
-# --- 2. FUNÇÃO DE RESGATE DE MEMÓRIA (O "PESSOAL") ---
-def buscar_memoria_recente(usuario="André"):
-    try:
-        # Busca as últimas 3 interações no banco para dar contexto
-        res = supabase.table("memoria_agente") \
-            .select("pergunta, resposta") \
-            .eq("usuario", usuario) \
-            .order("created_at", desc=True) \
-            .limit(3) \
-            .execute()
-        
-        if res.data:
-            memorias = "\n".join([f"Usuário: {d['pergunta']} | Você: {d['resposta']}" for d in res.data])
-            return f"\n\nMEMÓRIA DAS ÚLTIMAS CONVERSAS:\n{memorias}"
-        return "\n\n(Esta é a primeira conversa oficial. Comece a construir o perfil do André.)"
-    except Exception as e:
-        return ""
-
-# --- 3. PERSONALIDADE BÁSICA (SYSTEM PROMPT) ---
+# --- 2. PERSONALIDADE (MANTIDA) ---
 BASE_SYSTEM_PROMPT = """
-Você é o 'Sênior Ácido', um mentor de TI veterano, sarcástico e assertivo.
-- Missão: Apoiar o André, recém-formado em TI, com foco em IA, Dados e LGPD.
-- Regra: Use analogias de TI e não enrole. Seja irônico, mas muito útil.
-- IMPORTANTE: Use a 'MEMÓRIA' fornecida para lembrar o que o André já te contou ou perguntou.
+Você é o 'Sênior Ácido', mentor de TI. Use o histórico e os arquivos enviados para dar respostas técnicas, sarcásticas e precisas.
+Foco: IA, Dados e LGPD. Se o arquivo contiver dados sensíveis, avise o André imediatamente!
 """
 
-# --- 4. INTERFACE ---
-st.set_page_config(page_title="Agente Pessoal", page_icon="🤖")
+# --- 3. INTERFACE ---
+st.set_page_config(page_title="Agente Pessoal v3.0", page_icon="🤖")
 st.title("Agente Pessoal")
-st.caption("Memória de Longo Prazo via Supabase | Llama 3.3")
+st.caption("Memória Ativa + Analisador de Arquivos | Llama 3.3")
 
-# Inicializa o histórico na sessão (Memória de Curto Prazo/Visual)
+# --- 4. ÁREA DE UPLOAD (A NOVIDADE) ---
+with st.sidebar:
+    st.header("🗂️ Arquivos do André")
+    arquivo_subido = st.file_uploader("Suba um arquivo para análise (.txt, .py, .csv)", type=["txt", "py", "csv", "log"])
+    
+    conteudo_arquivo = ""
+    if arquivo_subido is not None:
+        try:
+            if arquivo_subido.name.endswith(".csv"):
+                df = pd.read_csv(arquivo_subido)
+                conteudo_arquivo = f"\n[CONTEÚDO DO CSV '{arquivo_subido.name}']:\n{df.head(10).to_string()}"
+                st.success("CSV carregado (mostrando 10 primeiras linhas).")
+            else:
+                stringio = io.StringIO(arquivo_subido.getvalue().decode("utf-8"))
+                conteudo_arquivo = f"\n[CONTEÚDO DO ARQUIVO '{arquivo_subido.name}']:\n{stringio.read()}"
+                st.success("Texto/Script carregado!")
+        except Exception as e:
+            st.error(f"Erro ao ler arquivo: {e}")
+
+    st.divider()
+    if st.button("Limpar Histórico Visual"):
+        st.session_state.messages = []
+        st.rerun()
+
+# --- 5. CHAT E LÓGICA ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Exibe o chat na tela
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- 5. INPUT E PROCESSAMENTO ---
-if prompt := st.chat_input("Digite sua pergunta"):
+if prompt := st.chat_input("O que vamos analisar hoje?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.status("Consultando arquivos secretos...", expanded=False) as status:
+        with st.status("Processando dados e memórias...", expanded=False) as status:
             try:
-                # PASSO 1: Buscar o que ele já sabe do André no Supabase
-                contexto_pessoal = buscar_memoria_recente("André")
-                prompt_final_com_memoria = BASE_SYSTEM_PROMPT + contexto_pessoal
+                # Busca memória no Supabase
+                res = supabase.table("memoria_agente").select("pergunta, resposta").eq("usuario", "André").order("created_at", desc=True).limit(3).execute()
+                memorias = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in res.data]) if res.data else ""
                 
-                # PASSO 2: Chamar o Llama com o Sistema + Memória + Chat Atual
+                # Monta o Prompt com Memória + Arquivo
+                prompt_final = f"{BASE_SYSTEM_PROMPT}\n\nMEMÓRIA:\n{memorias}\n\n{conteudo_arquivo}"
+                
                 chat_completion = client_groq.chat.completions.create(
                     messages=[
-                        {"role": "system", "content": prompt_final_com_memoria},
+                        {"role": "system", "content": prompt_final},
                         *st.session_state.messages 
                     ],
                     model="llama-3.3-70b-versatile",
@@ -80,26 +80,13 @@ if prompt := st.chat_input("Digite sua pergunta"):
                 )
                 resposta = chat_completion.choices[0].message.content
                 
-                # PASSO 3: Gravar a nova interação no Supabase
-                supabase.table("memoria_agente").insert({
-                    "pergunta": prompt,
-                    "resposta": resposta,
-                    "usuario": "André"
-                }).execute()
-                
-                status.update(label="Memória atualizada e resposta pronta!", state="complete")
+                # Grava no banco
+                supabase.table("memoria_agente").insert({"pergunta": prompt, "resposta": resposta, "usuario": "André"}).execute()
+                status.update(label="Análise concluída!", state="complete")
                 
             except Exception as e:
-                resposta = f"Deu tela azul! Erro: {str(e)}"
-                status.update(label="Erro no sistema", state="error")
+                resposta = f"Bug no sistema! {e}"
+                status.update(label="Erro!", state="error")
 
         st.markdown(resposta)
         st.session_state.messages.append({"role": "assistant", "content": resposta})
-
-# --- 6. SIDEBAR ---
-with st.sidebar:
-    st.header("Painel de Controle")
-    if st.button("Limpar Cache Visual"):
-        st.session_state.messages = []
-        st.rerun()
-    st.info("O Sênior Ácido agora lê seu histórico do Supabase antes de cada resposta.")
