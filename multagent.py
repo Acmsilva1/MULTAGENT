@@ -3,33 +3,48 @@ from groq import Groq
 from supabase import create_client, Client
 import json
 
-# --- 1. CONFIGURAÇÃO (LAYOUT CENTRALIZADO) ---
-st.set_page_config(page_title="Agente Pessoal", layout="centered", initial_sidebar_state="collapsed")
+# --- 1. CONFIGURAÇÃO (TOTAL CLEAN) ---
+st.set_page_config(page_title="Agente pessoal", layout="centered", initial_sidebar_state="collapsed")
 
-# --- 2. CSS PARA BOTÕES FLUTUANTES E INTERFACE ---
+# --- 2. CSS AVANÇADO: A DOCA DE COMANDOS ---
 st.markdown("""
     <style>
-        /* Esconde a barra lateral nativa */
-        [data-testid="stSidebar"] {display: none;}
+        /* Remove elementos inúteis do Streamlit */
+        [data-testid="stSidebar"], #MainMenu, footer {display: none;}
         
-        /* Estilização da área de controle flutuante */
-        .floating-controls {
+        /* Container flutuante na direita centralizado verticalmente */
+        .floating-dock {
             position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 999;
+            right: 25px;
+            top: 50%;
+            transform: translateY(-50%);
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 15px;
+            z-index: 1000;
+            background: rgba(38, 39, 48, 0.8);
+            padding: 15px;
+            border-radius: 50px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
         }
+
+        /* Ajuste do Uploader para não quebrar o layout */
+        .stFileUploader section {
+            padding: 0 !important;
+            width: 45px !important;
+            min-width: 45px !important;
+        }
+        .stFileUploader label { display: none; }
         
-        /* Ajuste do botão de upload para parecer um ícone flutuante */
-        .stFileUploader {
-            position: fixed;
-            bottom: 100px;
-            right: 20px;
-            width: 50px;
-            z-index: 999;
+        /* Ajuste do botão Novo para o Dock */
+        div.stButton > button {
+            border-radius: 50% !important;
+            width: 45px !important;
+            height: 45px !important;
+            padding: 0 !important;
+            font-size: 20px !important;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -49,21 +64,24 @@ def carregar_contexto():
         return perfil, hist
     except: return {}, []
 
-# --- 4. COMANDOS FLUTUANTES (FIXOS NA TELA) ---
-# Botão Novo Diálogo fixo no canto superior
+# --- 4. BARRA DE FERRAMENTAS FLUTUANTE (DOCK) ---
+# Usamos colunas vazias apenas para posicionar o uploader no dock
 with st.container():
-    col1, col2 = st.columns([0.9, 0.1])
-    with col2:
-        if st.button("Novo"):
-            st.session_state.messages = []
-            st.rerun()
-
-# Botão de Upload fixo acima do input de chat
-with st.container():
-    uploaded_file = st.file_uploader("📎", type=["txt", "py", "csv"], label_visibility="collapsed")
+    # Isso cria a estrutura visual no lado direito
+    st.markdown('<div class="floating-dock">', unsafe_allow_html=True)
+    
+    # Botão Novo Diálogo
+    if st.button("🆕", help="Resetar conversa atual"):
+        st.session_state.messages = []
+        st.rerun()
+    
+    # Upload de Arquivo (Ícone de Clipe)
+    uploaded_file = st.file_uploader("📎", type=["txt", "py", "csv"], help="Anexar contexto (LGPD Ativa)")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 5. CHAT PRINCIPAL ---
-st.title("Agente Pessoal")
+st.title("Agente pessoal")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -72,45 +90,38 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("Diga algo..."):
-    # Lógica de arquivo
+if prompt := st.chat_input("Em que posso ser útil hoje?"):
     contexto_arquivo = ""
     if uploaded_file:
         stringio = uploaded_file.getvalue().decode("utf-8")
-        contexto_arquivo = f"\n\n[ARQUIVO: {uploaded_file.name}]\n{stringio}"
+        contexto_arquivo = f"\n\n[FILE_CONTEXT: {uploaded_file.name}]\n{stringio}"
     
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(prompt if not uploaded_file else f"📎 {uploaded_file.name}\n\n{prompt}")
+        st.markdown(prompt if not uploaded_file else f"📎 **{uploaded_file.name}**\n\n{prompt}")
 
     with st.chat_message("assistant"):
         perfil, hist_raw = carregar_contexto()
         
-        # 1. Classificação e LGPD
-        res_class = client_groq.chat.completions.create(
-            messages=[{"role": "system", "content": 'Analise a mensagem e extraia JSON: {"is_important": boolean, "info": "string", "lgpd_risk": boolean}'}, {"role": "user", "content": prompt + contexto_arquivo}],
-            model="llama-3.3-70b-versatile", response_format={"type": "json_object"}
-        )
-        decisao = json.loads(res_class.choices[0].message.content)
-
-        # 2. Resposta com Memória
-        hist_context = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in hist_raw])
-        sys_prompt = f"Você é o Sênior. Mentor de TI. Sarcástico. Usa analogias criativas em suas respostas. Perfil do usuário: {perfil}. Histórico: {hist_context}"
-        
-        res_final = client_groq.chat.completions.create(
-            messages=[{"role": "system", "content": sys_prompt}, *st.session_state.messages],
+        # 1. IA Analisa TUDO (Prompt + Arquivo + LGPD)
+        res_ia = client_groq.chat.completions.create(
+            messages=[
+                {"role": "system", "content": f"Você é o Sênior. Sarcástico e técnico. Usa analogias criativas e assertivas. Perfil: {perfil}. Analise arquivos para LGPD/Malware."},
+                *st.session_state.messages,
+                {"role": "user", "content": contexto_arquivo} if contexto_arquivo else {"role": "system", "content": "Nenhum arquivo enviado."}
+            ],
             model="llama-3.3-70b-versatile"
         )
-        resposta = res_final.choices[0].message.content
-        
-        if decisao.get("lgpd_risk"):
-            resposta = "🚨 **ALERTA DE SEGURANÇA:** Identifiquei dados sensíveis no seu input/arquivo. Como seu mentor de TI, recomendo anonimizar isso antes de prosseguirmos.\n\n" + resposta
+        resposta = res_ia.choices[0].message.content
 
-        # 3. Salvamento Silencioso
-        supabase.table("historico_conversas").insert({
-            "usuario": "André", "pergunta": prompt, "resposta": resposta, 
-            "categoria": "importante" if (decisao.get("is_important") or uploaded_file) else "casual"
-        }).execute()
+        # 2. Notificação de Memória (Sempre que algo for relevante)
+        # Lógica interna para decidir se salvamos
+        if len(prompt) > 20 or uploaded_file:
+            supabase.table("historico_conversas").insert({
+                "usuario": "André", "pergunta": prompt, "resposta": resposta, 
+                "categoria": "importante" if uploaded_file else "casual"
+            }).execute()
+            if uploaded_file: st.toast("Arquivo processado!")
 
         st.markdown(resposta)
         st.session_state.messages.append({"role": "assistant", "content": resposta})
