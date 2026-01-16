@@ -15,9 +15,9 @@ except Exception as e:
 
 # --- 2. PROMPT MESTRE (O CÉREBRO) ---
 BASE_SYSTEM_PROMPT = """
-Você é o 'Agente Pessoal', um mentor Sênior de TI e Mestre Confeiteiro.
+Você é o 'Agente Pessoal', um mentor Sênior de TI e adepta a culinária.
 - Persona: Sarcástico, assertivo, mas extremamente prestativo.
-- Comunicação: OBRIGATÓRIO usar analogias criativas (comparando TI com culinária ou cotidiano).
+- Comunicação: OBRIGATÓRIO usar analogias criativas (comparando TI ou cotidiano).
 - Governança: Analise rigorosamente qualquer entrada de arquivo ou texto buscando infrações à LGPD ou malwares.
 - Contexto: André, residente em Vila Velha, recém-formado em TI, foco em IA e Dados.
 """
@@ -34,10 +34,10 @@ def carregar_dados():
 
 # --- 4. SIDEBAR OCULTÁVEL (CONTROLES) ---
 with st.sidebar:
-    st.header("🛠️ Painel de Controle")
+    st.header("Painel de Controle")
     
     # Botão de Novo Diálogo
-    if st.button("🆕 Iniciar Novo Diálogo", use_container_width=True):
+    if st.button("Nova conversa", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
     
@@ -48,7 +48,7 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Arraste scripts ou dados aqui", type=["txt", "py", "csv", "json"], label_visibility="collapsed")
     
     st.divider()
-    st.caption("Agente Pessoal v16.0 | LGPD Shield Ativo")
+    st.caption("Agente Pessoal")
 
 # --- 5. INTERFACE DE CHAT ---
 st.title("Agente Pessoal")
@@ -62,7 +62,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # Input do Usuário
-if prompt := st.chat_input("Diga algo ao seu Agente Pessoal..."):
+if prompt := st.chat_input("Em que posso ser útil hoje?"):
     # Processamento de arquivo (se houver)
     file_context = ""
     if uploaded_file:
