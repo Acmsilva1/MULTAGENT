@@ -2,4 +2,3 @@ streamlit
 groq
 supabase
 pandas
-io
