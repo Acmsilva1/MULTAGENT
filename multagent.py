@@ -5,7 +5,8 @@ import pandas as pd
 import json
 
 # --- 1. CONFIGURAÇÃO E CONEXÕES ---
-st.set_page_config(page_title="Agente Pessoal", layout="wide")
+# Ajustado para 'centered' para foco total no chat sem poluição lateral
+st.set_page_config(page_title="Agente Pessoal", layout="centered")
 
 try:
     client_groq = Groq(api_key=st.secrets["LLAMA_API_KEY"])
@@ -15,6 +16,7 @@ except Exception as e:
     st.stop()
 
 # --- 2. PERSONALIDADE E CLASSIFICADOR ---
+# Mantendo sua definição exata de 'Sênior'
 BASE_SYSTEM_PROMPT = "Você é o 'Sênior', mentor de TI e mestre confeiteiro. Ajude o André. Use analogias intligentes nas explicações. Seja sarcástico sem exagerar ou ofender."
 CLASSIFIER_PROMPT = 'Analise a mensagem e extraia fatos em JSON: {"is_important": boolean, "fact_type": "string", "extracted_info": "string"}'
 
@@ -29,7 +31,7 @@ def carregar_dados_usuario():
 
 def limpar_historico_db():
     try:
-        # Deleta apenas o que é conversa fiada (casual) para poupar o DB
+        # Deleta apenas o lixo (casual) como você pediu
         supabase.table("historico_conversas").delete().eq("categoria", "casual").execute()
         return True
     except Exception as e:
@@ -37,6 +39,7 @@ def limpar_historico_db():
         return False
 
 # --- 4. SIDEBAR (AUDITORIA E FAXINA) ---
+# A única parte visual além do chat, para manter a governança
 with st.sidebar:
     st.header("🧠 Memória Core")
     perfil, hist_raw = carregar_dados_usuario()
@@ -57,24 +60,26 @@ with st.sidebar:
     st.divider()
     arquivo = st.file_uploader("Upload de contexto", type=["txt", "py", "csv"])
 
-# --- 5. CHAT PRINCIPAL ---
-st.title("Agente Pessoal")
+# --- 5. CHAT PRINCIPAL (SEM POLUIÇÃO) ---
+st.title("Agente Sênior Ácido")
+st.caption("Foco em TI, Dados e Confeitaria Técnica")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Exibição limpa do histórico da sessão atual
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("Diga algo..."):
+if prompt := st.chat_input("O que vamos codificar (ou assar) hoje?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
         with st.status("Processando...", expanded=False) as status:
-            # Lógica de Classificação
+            # Lógica de Classificação para o DB
             try:
                 analise_res = client_groq.chat.completions.create(
                     messages=[{"role": "system", "content": CLASSIFIER_PROMPT}, {"role": "user", "content": prompt}],
@@ -85,7 +90,7 @@ if prompt := st.chat_input("Diga algo..."):
             except:
                 decisao = {"is_important": False}
 
-            # Update no Perfil (Se importante)
+            # Update no Perfil (Roteamento que você validou)
             if decisao.get("is_important"):
                 info = decisao.get("extracted_info")
                 tipo = decisao.get("fact_type").lower()
@@ -96,7 +101,7 @@ if prompt := st.chat_input("Diga algo..."):
                     novo_valor = f"{dado_atual} | {info}" if dado_atual else info
                     supabase.table("perfil_usuario").update({coluna: novo_valor}).eq("usuario", "André").execute()
 
-            # Resposta Final
+            # Geração da Resposta Final
             hist_str = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in hist_raw])
             prompt_final = f"{BASE_SYSTEM_PROMPT}\n\nPERFIL: {perfil}\n\nHISTÓRICO: {hist_str}"
             
@@ -106,14 +111,17 @@ if prompt := st.chat_input("Diga algo..."):
             )
             resposta = res_ia.choices[0].message.content
             
-            # Salva no Histórico
+            # Persistência no Histórico do DB (Sem aparecer na tela principal)
+            is_imp = decisao.get("is_important") or any(x in prompt.lower() for x in ["receita", "script", "codigo", "calculadora"])
             supabase.table("historico_conversas").insert({
                 "pergunta": prompt, 
                 "resposta": resposta, 
-                "categoria": "importante" if decisao.get("is_important") else "casual"
+                "categoria": "importante" if is_imp else "casual"
             }).execute()
             
             status.update(label="Pronto!", state="complete")
 
         st.markdown(resposta)
         st.session_state.messages.append({"role": "assistant", "content": resposta})
+        # Notificação discreta de salvamento
+        if is_imp: st.toast("🔖 Salvo no histórico importante.", icon="💾")
