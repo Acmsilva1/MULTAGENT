@@ -41,7 +41,7 @@ def carregar_contexto():
         return "Perfil básico.", "", {}
 
 # --- 4. INTERFACE ---
-st.set_page_config(page_title="Agente Sênior Ácido", page_icon="🍰")
+st.set_page_config(page_title="Agente Sênior Ácido")
 st.title("Agente Pessoal")
 st.caption("TI + Confeitaria + Memória Auditada")
 
