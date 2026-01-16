@@ -5,8 +5,7 @@ import pandas as pd
 import json
 
 # --- 1. CONFIGURAÇÃO E CONEXÕES ---
-# Ajustado para 'centered' para foco total no chat sem poluição lateral
-st.set_page_config(page_title="Agente Pessoal", layout="centered")
+st.set_page_config(page_title="Agente Pessoal", layout="wide")
 
 try:
     client_groq = Groq(api_key=st.secrets["LLAMA_API_KEY"])
@@ -16,70 +15,75 @@ except Exception as e:
     st.stop()
 
 # --- 2. PERSONALIDADE E CLASSIFICADOR ---
-# Mantendo sua definição exata de 'Sênior'
-BASE_SYSTEM_PROMPT = "Você é o 'Sênior', mentor de TI e mestre confeiteiro. Ajude o André. Use analogias intligentes nas explicações. Seja sarcástico sem exagerar ou ofender."
+BASE_SYSTEM_PROMPT = "Você é o 'Sênior', mentor de TI e mestre confeiteiro. Ajude o André. Use analogias inteligentes nas explicações. Seja sarcástico sem exagerar ou ofender."
 CLASSIFIER_PROMPT = 'Analise a mensagem e extraia fatos em JSON: {"is_important": boolean, "fact_type": "string", "extracted_info": "string"}'
 
 # --- 3. FUNÇÕES DE BANCO DE DADOS ---
 def carregar_dados_usuario():
     try:
         perfil = supabase.table("perfil_usuario").select("*").eq("usuario", "André").single().execute().data
-        historico = supabase.table("historico_conversas").select("pergunta, resposta").eq("usuario", "André").order("created_at", desc=True).limit(3).execute().data
-        return perfil, historico
+        # Busca o histórico simplificado para a lateral
+        historico_side = supabase.table("historico_conversas").select("pergunta, resposta, categoria").eq("usuario", "André").order("created_at", desc=True).limit(10).execute().data
+        return perfil, historico_side
     except:
         return None, []
 
 def limpar_historico_db():
     try:
-        # Deleta apenas o lixo (casual) como você pediu
         supabase.table("historico_conversas").delete().eq("categoria", "casual").execute()
         return True
     except Exception as e:
-        st.sidebar.error(f"Erro na faxina: {e}")
+        st.sidebar.error(f"Erro na limpeza: {e}")
         return False
 
-# --- 4. SIDEBAR (AUDITORIA E FAXINA) ---
-# A única parte visual além do chat, para manter a governança
+# --- 4. SIDEBAR (HISTÓRICO MINIMALISTA) ---
+perfil, hist_raw = carregar_dados_usuario()
+
 with st.sidebar:
-    st.header("🧠 Memória Core")
-    perfil, hist_raw = carregar_dados_usuario()
-    
+    st.header("🧠 Perfil")
     if perfil:
-        st.write(f"🎓 **Foco:** {perfil.get('formacao')}")
-        st.write(f"🎨 **Interesses:** {perfil.get('interesses')}")
-        with st.expander("Ver JSON do Banco"):
-            st.json(perfil)
+        st.caption(f"🎓 {perfil.get('formacao')}")
+        st.caption(f"🎨 {perfil.get('interesses')}")
     
     st.divider()
-    st.header("🧹 Governança de Dados")
-    if st.button("🗑️ Limpar Conversas Casuais"):
+    st.subheader("📜 Conversas Recentes")
+    
+    if hist_raw:
+        for item in hist_raw:
+            # Título encurtado com ícone de status
+            icon = "⭐" if item['categoria'] == 'importante' else "💬"
+            label = item['pergunta'][:25] + "..." if len(item['pergunta']) > 25 else item['pergunta']
+            
+            with st.expander(f"{icon} {label}"):
+                st.write(item['resposta'])
+    else:
+        st.write("Sem registros.")
+
+    st.divider()
+    if st.button("🗑️ Limpar Casuais"):
         if limpar_historico_db():
-            st.sidebar.success("Lixo deletado! O plano Free agradece.")
             st.rerun()
 
-    st.divider()
-    arquivo = st.file_uploader("Upload de contexto", type=["txt", "py", "csv"])
-
-# --- 5. CHAT PRINCIPAL (SEM POLUIÇÃO) ---
+# --- 5. CHAT PRINCIPAL ---
 st.title("Agente Sênior Ácido")
-st.caption("Foco em TI, Dados e Confeitaria Técnica")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Exibição limpa do histórico da sessão atual
+# Área de exibição das mensagens
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("O que vamos codificar (ou assar) hoje?"):
+# Input fixo no rodapé
+if prompt := st.chat_input("Fale com o Sênior..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.status("Processando...", expanded=False) as status:
-            # Lógica de Classificação para o DB
+        with st.status("Pensando...", expanded=False) as status:
+            # Classificação interna
             try:
                 analise_res = client_groq.chat.completions.create(
                     messages=[{"role": "system", "content": CLASSIFIER_PROMPT}, {"role": "user", "content": prompt}],
@@ -90,20 +94,18 @@ if prompt := st.chat_input("O que vamos codificar (ou assar) hoje?"):
             except:
                 decisao = {"is_important": False}
 
-            # Update no Perfil (Roteamento que você validou)
+            # Atualização Silenciosa de Perfil
             if decisao.get("is_important"):
                 info = decisao.get("extracted_info")
-                tipo = decisao.get("fact_type").lower()
-                coluna = "formacao" if "carreira" in tipo else "interesses"
-                
+                coluna = "formacao" if "carreira" in str(decisao.get("fact_type")).lower() else "interesses"
                 dado_atual = perfil.get(coluna) if perfil else ""
-                if info.lower() not in str(dado_atual).lower():
+                if info and info.lower() not in str(dado_atual).lower():
                     novo_valor = f"{dado_atual} | {info}" if dado_atual else info
                     supabase.table("perfil_usuario").update({coluna: novo_valor}).eq("usuario", "André").execute()
 
-            # Geração da Resposta Final
-            hist_str = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in hist_raw])
-            prompt_final = f"{BASE_SYSTEM_PROMPT}\n\nPERFIL: {perfil}\n\nHISTÓRICO: {hist_str}"
+            # Resposta Final
+            hist_contexto = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in hist_raw[:3]])
+            prompt_final = f"{BASE_SYSTEM_PROMPT}\n\nCONTEXTO: {perfil}\n\nHISTÓRICO: {hist_contexto}"
             
             res_ia = client_groq.chat.completions.create(
                 messages=[{"role": "system", "content": prompt_final}, *st.session_state.messages],
@@ -111,17 +113,17 @@ if prompt := st.chat_input("O que vamos codificar (ou assar) hoje?"):
             )
             resposta = res_ia.choices[0].message.content
             
-            # Persistência no Histórico do DB (Sem aparecer na tela principal)
-            is_imp = decisao.get("is_important") or any(x in prompt.lower() for x in ["receita", "script", "codigo", "calculadora"])
+            # Persistência no DB
+            is_imp = decisao.get("is_important") or any(x in prompt.lower() for x in ["receita", "script", "codigo"])
             supabase.table("historico_conversas").insert({
+                "usuario": "André",
                 "pergunta": prompt, 
                 "resposta": resposta, 
                 "categoria": "importante" if is_imp else "casual"
             }).execute()
             
-            status.update(label="Pronto!", state="complete")
+            status.update(label="Concluído!", state="complete")
 
         st.markdown(resposta)
         st.session_state.messages.append({"role": "assistant", "content": resposta})
-        # Notificação discreta de salvamento
-        if is_imp: st.toast("🔖 Salvo no histórico importante.", icon="💾")
+        if is_imp: st.toast("💾 Salvo permanentemente!", icon="⭐")
