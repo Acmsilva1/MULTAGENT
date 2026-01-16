@@ -37,7 +37,7 @@ def carregar_contexto():
         return "Perfil básico ativo.", ""
 
 # --- 4. INTERFACE E SIDEBAR (UPLOAD VOLTOU!) ---
-st.set_page_config(page_title="Agente Autônomo 5.1", page_icon="🍰")
+st.set_page_config(page_title="Agente Autônomo 5.1")
 st.title("Agente Pessoal")
 st.caption("Memória Seletiva + Analisador de Arquivos + Mestre Confeiteiro")
 
@@ -75,7 +75,7 @@ if prompt := st.chat_input("Diga algo ou analise um arquivo..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.status("Preparando a massa dos dados...", expanded=False) as status:
+        with st.status("Pensando...", expanded=False) as status:
             perfil, historico = carregar_contexto()
             
             # PASSO 1: O Classificador analisa o prompt (e pode considerar o arquivo se você pedir)
