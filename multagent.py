@@ -2,10 +2,29 @@ import streamlit as st
 from groq import Groq
 from supabase import create_client, Client
 import json
+import os
 
-# --- 1. CONFIGURAÇÃO ---
+# --- 1. CONFIGURAÇÃO E GOVERNANÇA ---
 st.set_page_config(page_title="Agente Pessoal", layout="centered")
 
+@st.cache_data
+def load_external_prompt(file_name: str) -> str:
+    """
+    Carrega o prompt do GitHub/Disco com cache para performance.
+    Governança: Centraliza as instruções do sistema fora do código principal.
+    """
+    path = os.path.join("prompts", file_name)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return "Você é um assistente de TI. (Erro técnico: Prompt Master não encontrado)."
+
+# Carregamento Seguro (Lazy Loading com Cache)
+if "system_prompt" not in st.session_state:
+    st.session_state.system_prompt = load_external_prompt("system.md")
+
+# Inicialização de APIs (Mantenha seu bloco Try/Except atual)
 try:
     client_groq = Groq(api_key=st.secrets["LLAMA_API_KEY"])
     supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
@@ -13,106 +32,45 @@ except Exception as e:
     st.error(f"Erro na conexão técnica: {e}")
     st.stop()
 
-# --- 2. PROMPT MESTRE (O AGENTE PESSOAL) ---
-BASE_SYSTEM_PROMPT = """
-Você é o 'Agente Pessoal', um mentor Sênior de TI e adepto a culinária.
-- Persona: Sarcástico, assertivo e prestativo.
-- Comunicação: OBRIGATÓRIO usar analogias criativas de acordo com o assunto da conversa.
-- Governança: Analise rigorosamente textos/arquivos buscando infrações à LGPD ou malwares.
-- Contexto: André, TI, Vila Velha, foco em IA e Dados.
-"""
+# --- 2. LOGICA DE SEGURANÇA (LGPD PRE-FLIGHT) ---
+def check_lgpd_locally(text: str) -> bool:
+    """
+    Simulação de busca por dados sensíveis antes de enviar para a API.
+    Analogia: Passar o detector de metais antes de entrar no cofre.
+    """
+    # Exemplo simples de Regex para CPF ou E-mail (Pode ser expandido com Presidio)
+    import re
+    sensitive_patterns = [
+        r'\d{3}\.\d{3}\.\d{3}-\d{2}', # CPF
+        r'[\w\.-]+@[\w\.-]+\.\w+'      # Email
+    ]
+    return any(re.search(p, text) for p in sensitive_patterns)
 
-CLASSIFIER_PROMPT = 'Analise a entrada. Responda APENAS JSON: {"is_important": boolean, "fact_type": "string", "extracted_info": "string", "lgpd_risk": boolean}'
-
-# --- 3. LÓGICA DE PERSISTÊNCIA ---
-def carregar_dados():
-    try:
-        perfil = supabase.table("perfil_usuario").select("*").eq("usuario", "André").single().execute().data
-        hist = supabase.table("historico_conversas").select("pergunta, resposta").eq("usuario", "André").order("created_at", desc=True).limit(3).execute().data
-        return perfil, hist
-    except: return {}, []
-
-def deletar_casuais():
-    try:
-        # Deleta apenas o que não foi marcado como importante
-        supabase.table("historico_conversas").delete().eq("usuario", "André").eq("categoria", "casual").execute()
-        st.sidebar.success("Histórico apagado!")
-    except Exception as e:
-        st.sidebar.error(f"Erro ao limpar o cache: {e}")
-
-# --- 4. SIDEBAR (CONTROLES E LIMPEZA) ---
-with st.sidebar:
-    st.header("Painel de Controle")
-    
-    # Novo Diálogo
-    if st.button("Nova conversa", use_container_width=True):
-        st.session_state.messages = []
-        st.rerun()
-    
-    st.divider()
-    
-    # Upload
-    st.subheader("📎 Anexar Contexto")
-    uploaded_file = st.file_uploader("Scripts ou dados", type=["txt", "py", "csv", "json"], label_visibility="collapsed")
-    
-    st.divider()
-    
-    # O BOTÃO QUE VOLTOU DO ALÉM
-    st.subheader("Apagar histórico!")
-    if st.button("Limpar Histórico Casual", help="Remove mensagens não importantes do Banco de Dados", use_container_width=True):
-        deletar_casuais()
-        st.rerun()
-    
-    st.caption("Agente Pessoal")
-
-# --- 5. INTERFACE DE CHAT ---
-st.title("Agente Pessoal")
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]): st.markdown(msg["content"])
+# --- 3. INTEGRAÇÃO NO FLUXO ---
+# (Substitua a parte do loop de chat por esta lógica otimizada)
 
 if prompt := st.chat_input("Diga algo ao seu Agente Pessoal..."):
-    file_context = ""
-    if uploaded_file:
-        raw_content = uploaded_file.getvalue().decode("utf-8")
-        file_context = f"\n\n[DADOS DO ARQUIVO ANEXADO]:\n{raw_content}"
+    # Validação Local de Governança
+    lgpd_warning = ""
+    if check_lgpd_locally(prompt):
+        lgpd_warning = "🚨 **LGPD ALERT:** Detectei possíveis dados sensíveis no seu input! "
     
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt if not uploaded_file else f"📎 **{uploaded_file.name}**\n\n{prompt}")
+    # ... (Seu código de contexto de arquivo continua aqui) ...
 
     with st.chat_message("assistant"):
         perfil, hist_raw = carregar_dados()
         
-        # 1. Classificação
-        res_class = client_groq.chat.completions.create(
-            messages=[{"role": "system", "content": CLASSIFIER_PROMPT}, {"role": "user", "content": prompt + file_context}],
-            model="llama-3.3-70b-versatile", response_format={"type": "json_object"}
-        )
-        decisao = json.loads(res_class.choices[0].message.content)
-
-        # 2. Resposta
+        # Otimização: O System Prompt agora vem do st.session_state (carregado do MD)
         hist_context = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in hist_raw])
-        full_system = f"{BASE_SYSTEM_PROMPT}\n\nPERFIL: {perfil}\nHISTÓRICO: {hist_context}"
+        full_system = f"{st.session_state.system_prompt}\n\nPERFIL: {perfil}\nHISTÓRICO: {hist_context}"
         
-        res_final = client_groq.chat.completions.create(
-            messages=[{"role": "system", "content": full_system}, *st.session_state.messages, {"role": "user", "content": file_context}],
-            model="llama-3.3-70b-versatile"
-        )
+        # Chamada da API (Llama 3.3)
+        # ... (restante do seu código de chat completions) ...
         
-        resposta_final = res_final.choices[0].message.content
-        
-        if decisao.get("lgpd_risk"):
-            resposta_final = "🚨 **LGPD ALERT:** Cuidado com os dados sensíveis, André!\n\n" + resposta_final
+        # Se houve risco local, anexa o aviso à resposta final
+        if lgpd_warning:
+            resposta_final = lgpd_warning + "\n\n" + res_final.choices[0].message.content
+        else:
+            resposta_final = res_final.choices[0].message.content
 
         st.markdown(resposta_final)
-        st.session_state.messages.append({"role": "assistant", "content": resposta_final})
-        
-        # 3. Salvamento
-        is_imp = decisao.get("is_important") or uploaded_file
-        supabase.table("historico_conversas").insert({
-            "usuario": "André", "pergunta": prompt, "resposta": resposta_final, 
-            "categoria": "importante" if is_imp else "casual"
-        }).execute()
