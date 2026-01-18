@@ -59,7 +59,7 @@ with st.sidebar:
     if st.button("Limpar Chat"):
         st.session_state.messages = []; st.rerun()
 
-st.title("Senior")
+st.title("Agente pessoal")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
