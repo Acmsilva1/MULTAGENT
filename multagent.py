@@ -3,10 +3,9 @@ from groq import Groq
 from supabase import create_client, Client
 from PyPDF2 import PdfReader
 import os
-import re
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Agente Orquestrador André", layout="centered")
+st.set_page_config(page_title="Agente pessoal", layout="centered")
 
 try:
     client_groq = Groq(api_key=st.secrets["LLAMA_API_KEY"])
@@ -15,25 +14,31 @@ except:
     st.error("Erro de conexão. Verifique os Secrets.")
     st.stop()
 
-# --- LÓGICA DE ROTEAMENTO (O CÉREBRO) ---
+# --- LÓGICA DE ROTEAMENTO (Dicionário de Domínios) ---
 def escolher_modelo(prompt, tem_arquivo):
-    # Se subiu arquivo, a LGPD exige o modelo mais inteligente (70B)
+    # 1. Arquivos SEMPRE acionam o Sênior (Governança LGPD)
     if tem_arquivo:
-        return "llama-3.3-70b-versatile", "Sênior (Análise de Doc)"
+        return "llama-3.3-70b-versatile", "Sênior (Análise de Dados/LGPD)"
     
-    # Termos que exigem raciocínio complexo ou governança
-    termos_complexos = [
-        'arquitetura', 'migração', 'sql', 'db', 'otimizar', 
-        'lgpd', 'segurança', 'pipeline', 'infra', 'data lake'
-    ]
+    # 2. Categorias de Alta Performance e Engenharia
+    dominios_senior = {
+        'industria_engenharia': ['turbina', 'jato', 'motor', 'propulsão', 'aerodinâmica', 'termodinâmica'],
+        'iot_hardware': ['iot', 'sensores', 'telemetria', 'esp32', 'arduino', 'raspberry', 'protocolo'],
+        'arquitetura_dados': ['sql', 'data lake', 'pipeline', 'migração', 'batch', 'etl', 'otimização'],
+        'governanca_seguranca': ['lgpd', 'criptografia', 'segurança', 'pentest', 'anonimização', 'vulnerabilidade']
+    }
     
-    if any(t in prompt.lower() for t in termos_complexos):
-        return "llama-3.3-70b-versatile", "Sênior (Complexidade)"
+    # Flatten para busca eficiente
+    palavras_chave = [termo for sublist in dominios_senior.values() for termo in sublist]
     
-    # Para o resto, vamos de 8B economizar cota
-    return "llama-3.1-8b-instant", "Estagiário Veloz (Casual)"
+    # Verificação de ativação
+    if any(t in prompt.lower() for t in palavras_chave):
+        return "llama-3.3-70b-versatile", "Sênior (Especialista Ativado)"
+    
+    # 3. Default Econômico
+    return "llama-3.1-8b-instant", "Estagiário (Casual)"
 
-# --- FUNÇÕES AUXILIARES ---
+# --- FUNÇÕES ---
 def extrair_texto_pdf(file):
     try:
         reader = PdfReader(file)
@@ -46,38 +51,35 @@ with st.sidebar:
     if st.button("Nova Conversa"):
         st.session_state.messages = []
         st.rerun()
-    uploaded_file = st.file_uploader("Upload de Contexto", type=["pdf", "txt"])
+    uploaded_file = st.file_uploader("Contexto (PDF/TXT)", type=["pdf", "txt"])
 
 st.title("Agente Orquestrador 🤖")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-for msg in st.session_state.messages[-6:]:
+# Exibe histórico curto para economizar tokens
+for msg in st.session_state.messages[-4:]:
     with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-if prompt := st.chat_input("Mande sua dúvida técnica ou casual..."):
-    # 1. Decisão de Roteamento
+if prompt := st.chat_input("Fale sobre turbinas, IoT ou LGPD..."):
+    # Executa o Roteamento
     modelo_id, modelo_nome = escolher_modelo(prompt, uploaded_file is not None)
     
     file_context = ""
     if uploaded_file:
         raw = extrair_texto_pdf(uploaded_file) if ".pdf" in uploaded_file.name else uploaded_file.getvalue().decode()
-        file_context = f"\n[ARQUIVO]: {raw[:8000]}"
+        file_context = f"\n[ARQUIVO]: {raw[:5000]}"
 
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Mostra qual modelo foi ativado (transparência de TI)
-        st.caption(f"🚀 Ativado: {modelo_nome}")
+        st.caption(f"🧠 Modelo em uso: {modelo_nome}")
         
-        # Puxa histórico e perfil para o System Prompt
-        hist = supabase.table("historico_conversas").select("pergunta, resposta").eq("usuario", "André").order("created_at", desc=True).limit(2).execute().data
-        hist_context = "\n".join([f"U:{h['pergunta']}|A:{h['resposta']}" for h in reversed(hist)])
-        
-        # System Prompt v2.0 Turbo injetado
-        system_msg = f"Você é o Mentor Sênior do André. Priorize solução técnica antes do sarcasmo. Contexto: {hist_context}"
+        # Injeção de System Prompt (Vindo do seu arquivo system.md via session_state ou carregamento)
+        # Assumindo que você usa o conteúdo do system.md que revisamos
+        system_msg = "Você é o Mentor Sênior do André. Priorize solução técnica antes do sarcasmo. Seja brutalmente honesto."
 
         try:
             res = client_groq.chat.completions.create(
@@ -92,11 +94,10 @@ if prompt := st.chat_input("Mande sua dúvida técnica ou casual..."):
             st.markdown(resposta)
             st.session_state.messages.append({"role": "assistant", "content": resposta})
             
-            # Log no Supabase
+            # Registro de Log
             supabase.table("historico_conversas").insert({
-                "usuario": "André", "pergunta": prompt, "resposta": resposta, 
-                "categoria": "importante" if uploaded_file else "casual"
+                "usuario": "André", "pergunta": prompt, "resposta": resposta, "categoria": "orquestrado"
             }).execute()
             
         except Exception as e:
-            st.error(f"Falha na orquestração: {e}")
+            st.error(f"Erro na orquestração: {e}")
