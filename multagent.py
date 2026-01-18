@@ -17,7 +17,8 @@ def load_external_prompt(file_name: str) -> str:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
     except Exception:
-        return "Você é um assistente de TI sênior e mentor de André."
+        # Se falhar, pelo menos mantém a essência
+        return "Você é um assistente de TI sênior sarcástico e assertivo. Use humor e exemplos práticos."
 
 if "system_prompt" not in st.session_state:
     st.session_state.system_prompt = load_external_prompt("system.md")
@@ -29,28 +30,24 @@ except Exception as e:
     st.error(f"Erro de conexão técnica: {e}")
     st.stop()
 
-# --- 2. FUNÇÕES DE SUPORTE (A COZINHA) ---
+# --- 2. FUNÇÕES DE SUPORTE ---
 
 def buscar_contexto_mundo():
-    """Busca localização e clima sem chaves de API (Open Source)."""
+    """Coleta localização e clima reais para injetar na mente do agente."""
     try:
-        # Localização por IP
         geo = requests.get("http://ip-api.com/json/", timeout=5).json()
         cidade = geo.get("city", "Vila Velha")
         lat, lon = geo.get("lat", -20.32), geo.get("lon", -40.29)
-
-        # Clima (Open-Meteo)
         w_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
         clima = requests.get(w_url, timeout=5).json()
         temp = clima["current_weather"]["temperature"]
-        return f"\n[CONTEXTO MUNDIAL]: Em {cidade} faz {temp}°C."
+        return f"[DADOS REAIS DO MUNDO]: Localização: {cidade}. Temperatura: {temp}°C."
     except:
-        return "\n[CONTEXTO MUNDIAL]: Localização/Clima indisponíveis."
+        return "[DADOS REAIS DO MUNDO]: Informações externas indisponíveis no momento."
 
 def extrair_texto_pdf(file):
     try:
         reader = PdfReader(file)
-        # Limite de segurança: lemos até 15 páginas para evitar estouro de memória
         return "".join([page.extract_text() for page in reader.pages[:15]])
     except Exception as e:
         return f"Erro ao processar PDF: {e}"
@@ -73,13 +70,8 @@ with st.sidebar:
     if st.button("Nova Conversa", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
-    
     st.divider()
     uploaded_file = st.file_uploader("Subir Docs (PDF, TXT, PY)", type=["pdf", "txt", "py", "json"])
-    
-    if st.button("Limpar Histórico Casual", use_container_width=True):
-        supabase.table("historico_conversas").delete().eq("usuario", "André").eq("categoria", "casual").execute()
-        st.success("Lixo removido!")
 
 # --- 4. INTERFACE ---
 st.title("Agente Pessoal 🤖")
@@ -88,21 +80,20 @@ if "messages" not in st.session_state: st.session_state.messages = []
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-# --- 5. FLUXO EXECUTIVO ---
+# --- 5. FLUXO EXECUTIVO (O PULO DO GATO) ---
 if prompt := st.chat_input("Diga algo..."):
     lgpd_risk = check_lgpd_locally(prompt)
     
-    file_context = ""
+    file_content = ""
     if uploaded_file:
-        with st.spinner("Lendo arquivo..."):
+        with st.spinner("Analisando arquivo..."):
             if uploaded_file.type == "application/pdf":
                 raw_content = extrair_texto_pdf(uploaded_file)
             else:
                 raw_content = uploaded_file.getvalue().decode("utf-8")
             
-            # Limite de segurança para a Groq (30k caracteres)
             raw_content = raw_content[:30000] if len(raw_content) > 30000 else raw_content
-            file_context = f"\n\n[DADOS DO ARQUIVO]:\n{raw_content}"
+            file_content = f"\n\n[DADOS DO ARQUIVO ANEXADO]:\n{raw_content}"
             lgpd_risk = lgpd_risk or check_lgpd_locally(raw_content)
 
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -111,17 +102,24 @@ if prompt := st.chat_input("Diga algo..."):
 
     with st.chat_message("assistant"):
         perfil, hist_raw = carregar_dados_simples()
-        world_context = buscar_contexto_mundo() # A janela para o mundo
+        mundo = buscar_contexto_mundo() # Pega clima/cidade agora
         
         hist_context = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in reversed(hist_raw)])
         
-        full_system = f"{st.session_state.system_prompt}\n{world_context}\nPERFIL: {perfil}\nHISTÓRICO:\n{hist_context}"
+        # INSTRUÇÃO MESTRE: Forçamos ele a usar os dados reais e manter a persona
+        instrucao_mestre = (
+            f"\n\nIMPORTANTE: Use os {mundo} para responder. "
+            "Seja sarcástico, assertivo e direto. Não sugira sites externos se a informação está aqui. "
+            "Ignore etiquetas sociais excessivas e aja como o mentor de TI do André."
+        )
+        
+        full_system = f"{st.session_state.system_prompt}\n{instrucao_mestre}\nPERFIL_USUARIO: {perfil}\nHISTORICO_RECENTE:\n{hist_context}"
         
         res_final = client_groq.chat.completions.create(
             messages=[
                 {"role": "system", "content": full_system}, 
                 *st.session_state.messages, 
-                {"role": "user", "content": file_context}
+                {"role": "user", "content": file_content}
             ],
             model="llama-3.3-70b-versatile"
         )
@@ -132,7 +130,7 @@ if prompt := st.chat_input("Diga algo..."):
         st.markdown(resposta_final)
         st.session_state.messages.append({"role": "assistant", "content": resposta_final})
         
-        # Persistência no banco
+        # Salvamento
         supabase.table("historico_conversas").insert({
             "usuario": "André", "pergunta": prompt, "resposta": resposta_final, 
             "categoria": "importante" if uploaded_file else "casual"
