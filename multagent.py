@@ -53,7 +53,7 @@ with st.sidebar:
         st.rerun()
     uploaded_file = st.file_uploader("Contexto (PDF/TXT)", type=["pdf", "txt"])
 
-st.title("Agente Orquestrador 🤖")
+st.title("Agente pessoal 🤖")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
