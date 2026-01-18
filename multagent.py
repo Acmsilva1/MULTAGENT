@@ -2,127 +2,71 @@ import streamlit as st
 from groq import Groq
 from supabase import create_client, Client
 from PyPDF2 import PdfReader
-import json
 import os
-import re
 
-# --- 1. CONFIGURAÇÃO E CACHE ---
-st.set_page_config(page_title="Agente Pessoal", layout="centered")
-
-@st.cache_data
-def load_external_prompt(file_name: str) -> str:
-    path = os.path.join("prompts", file_name)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception:
-        return "Você é um mentor de TI sênior, assertivo e sarcástico."
-
-if "system_prompt" not in st.session_state:
-    st.session_state.system_prompt = load_external_prompt("system.md")
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="Agente André 1.0 Turbo", layout="centered")
 
 try:
     client_groq = Groq(api_key=st.secrets["LLAMA_API_KEY"])
     supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-except Exception as e:
-    st.error(f"Erro de conexão: {e}")
+except:
+    st.error("Erro de conexão. Verifique os Secrets.")
     st.stop()
 
-# --- 2. FUNÇÕES DE SUPORTE ---
-
-def extrair_texto_pdf(file):
-    try:
-        reader = PdfReader(file)
-        # Limite de segurança para não estourar tokens
-        return "".join([page.extract_text() for page in reader.pages[:10]])
-    except Exception as e:
-        return f"Erro ao processar PDF: {e}"
-
-def carregar_dados_usuario():
-    try:
-        perfil = supabase.table("perfil_usuario").select("*").eq("usuario", "André").single().execute().data
-        hist = supabase.table("historico_conversas").select("pergunta, resposta").eq("usuario", "André").order("created_at", desc=True).limit(5).execute().data
-        return perfil, hist
-    except:
-        return {}, []
-
-def check_lgpd_locally(text: str) -> bool:
-    patterns = [r'\d{3}\.\d{3}\.\d{3}-\d{2}', r'[\w\.-]+@[\w\.-]+\.\w+']
-    return any(re.search(p, text) for p in patterns)
-
-# --- 3. SIDEBAR (FUNCIONALIDADES ORIGINAIS) ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.header("Painel de Controle")
-    if st.button("Nova Conversa", use_container_width=True):
+    st.header("Configurações")
+    if st.button("Nova Conversa"):
         st.session_state.messages = []
         st.rerun()
-    
-    st.divider()
-    uploaded_file = st.file_uploader("Subir Docs (PDF, TXT)", type=["pdf", "txt"])
-    
-    if st.button("Limpar Histórico Casual", use_container_width=True):
-        supabase.table("historico_conversas").delete().eq("usuario", "André").eq("categoria", "casual").execute()
-        st.success("Histórico limpo!")
+    uploaded_file = st.file_uploader("Subir Doc (TXT/PDF)", type=["pdf", "txt"])
 
-# --- 4. INTERFACE DE CHAT ---
+# --- LÓGICA DE CHAT ---
 st.title("Agente Pessoal 🤖")
+if "messages" not in st.session_state: st.session_state.messages = []
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+for msg in st.session_state.messages[-6:]: # Mantém só as últimas 6 visíveis
+    with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]): 
-        st.markdown(msg["content"])
-
-# --- 5. FLUXO EXECUTIVO ---
-if prompt := st.chat_input("Diga algo..."):
-    lgpd_risk = check_lgpd_locally(prompt)
-    
+if prompt := st.chat_input("Fale comigo..."):
+    # 1. Preparar contexto de arquivo (Limitado a 4000 caracteres para segurança total)
     file_context = ""
     if uploaded_file:
-        with st.spinner("Processando arquivo..."):
-            if uploaded_file.type == "application/pdf":
-                raw_content = extrair_texto_pdf(uploaded_file)
-            else:
-                raw_content = uploaded_file.getvalue().decode("utf-8")
-            
-            # Corte de segurança para evitar o Rate Limit que deu erro antes
-            raw_content = raw_content[:15000] 
-            file_context = f"\n\n[DADOS DO ARQUIVO]:\n{raw_content}"
-            lgpd_risk = lgpd_risk or check_lgpd_locally(raw_content)
+        if ".pdf" in uploaded_file.name:
+            reader = PdfReader(uploaded_file)
+            raw = "".join([p.extract_text() for p in reader.pages[:2]]) # Apenas 2 páginas
+        else:
+            raw = uploaded_file.getvalue().decode()
+        file_context = f"\n[CONTEXTO ARQUIVO]: {raw[:4000]}"
 
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): 
-        st.markdown(prompt if not uploaded_file else f"📎 **{uploaded_file.name}**\n\n{prompt}")
+    with st.chat_message("user"): st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        perfil, hist_raw = carregar_dados_usuario()
-        hist_context = "\n".join([f"U: {d['pergunta']} | A: {d['resposta']}" for d in reversed(hist_raw)])
+        # 2. Puxar apenas o essencial do histórico
+        hist = supabase.table("historico_conversas").select("pergunta, resposta").eq("usuario", "André").order("created_at", desc=True).limit(2).execute().data
+        hist_context = "\n".join([f"U:{h['pergunta']}|A:{h['resposta']}" for h in reversed(hist)])
         
-        full_system = f"{st.session_state.system_prompt}\n\nPERFIL: {perfil}\nHISTORICO:\n{hist_context}"
-        
+        system_msg = f"Você é o mentor de TI do André. Sarcástico e direto. Histórico: {hist_context}"
+
         try:
-            res_final = client_groq.chat.completions.create(
+            # AQUI ESTÁ A MÁGICA DO MODELO MENOR
+            res = client_groq.chat.completions.create(
                 messages=[
-                    {"role": "system", "content": full_system}, 
-                    *st.session_state.messages, 
-                    {"role": "user", "content": file_context}
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": f"{file_context}\n\nPergunta: {prompt}"}
                 ],
-                model="llama-3.3-70b-versatile"
+                model="llama-3.1-8b-instant" # <--- O MODELO QUE DURA MAIS
             )
             
-            resposta_final = res_final.choices[0].message.content
-            if lgpd_risk: 
-                resposta_final = "🚨 **LGPD ALERT:** Dados sensíveis detectados!\n\n" + resposta_final
-
-            st.markdown(resposta_final)
-            st.session_state.messages.append({"role": "assistant", "content": resposta_final})
+            resposta = res.choices[0].message.content
+            st.markdown(resposta)
+            st.session_state.messages.append({"role": "assistant", "content": resposta})
             
-            # Salvar no Supabase
+            # Salvar no Banco
             supabase.table("historico_conversas").insert({
-                "usuario": "André", "pergunta": prompt, "resposta": resposta_final, 
-                "categoria": "importante" if uploaded_file else "casual"
+                "usuario": "André", "pergunta": prompt, "resposta": resposta, "categoria": "casual"
             }).execute()
-        
         except Exception as e:
-            st.error(f"Erro na API da Groq: {e}. Tente novamente em alguns segundos.")
+            st.error(f"Esgotou até o modelo 8B! Aguarde um pouco. Erro: {e}")
