@@ -18,7 +18,7 @@ except:
 def escolher_modelo(prompt, tem_arquivo):
     # 1. Arquivos SEMPRE acionam o Sênior (Governança LGPD)
     if tem_arquivo:
-        return "llama-3.3-70b-versatile", "Sênior (Análise de Dados/LGPD)"
+        return "llama-3.3-70b-versatile", "Sênior"
     
     # 2. Categorias de Alta Performance e Engenharia
     dominios_senior = {
@@ -33,10 +33,10 @@ def escolher_modelo(prompt, tem_arquivo):
     
     # Verificação de ativação
     if any(t in prompt.lower() for t in palavras_chave):
-        return "llama-3.3-70b-versatile", "Sênior (Especialista Ativado)"
+        return "llama-3.3-70b-versatile", "Sênior"
     
     # 3. Default Econômico
-    return "llama-3.1-8b-instant", "Estagiário (Casual)"
+    return "llama-3.1-8b-instant", "Estagiário"
 
 # --- FUNÇÕES ---
 def extrair_texto_pdf(file):
@@ -53,7 +53,7 @@ with st.sidebar:
         st.rerun()
     uploaded_file = st.file_uploader("Contexto (PDF/TXT)", type=["pdf", "txt"])
 
-st.title("Agente pessoal 🤖")
+st.title("Agente pessoal")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -62,7 +62,7 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages[-4:]:
     with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-if prompt := st.chat_input("Fale sobre turbinas, IoT ou LGPD..."):
+if prompt := st.chat_input("Em que posso te ajudar?"):
     # Executa o Roteamento
     modelo_id, modelo_nome = escolher_modelo(prompt, uploaded_file is not None)
     
