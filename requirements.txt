@@ -2,3 +2,4 @@ streamlit
 groq
 supabase
 PyPDF2
+requests
